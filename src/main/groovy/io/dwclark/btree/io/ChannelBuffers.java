@@ -1,152 +1,46 @@
 package io.dwclark.btree.io;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.util.Set;
 import java.util.EnumSet;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiConsumer;
 
-public class BufferPool {
-    private static final long PARALLEL_THRESHOLD = 4L;
-    private static final Set<StandardOpenOption> OPTIONS =
-        EnumSet.of(StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-    
-    private final ConcurrentHashMap<Key,Value> buffers = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Object,PathChannel> channels = new ConcurrentHashMap<>();
+public class ChannelBuffers {
 
-    class PathChannel {
-        final Path path;
-        final FileChannel channel;
-
-        public PathChannel(final Path path, final FileChannel channel) {
-            this.path = path;
-            this.channel = channel;
-        }
-
-        public long size() {
-            try {
-                return channel.size();
-            }
-            catch(IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        public Value readFully(final Key key, final Value value) {
-            try {
-                final ByteBuffer buf = value.buffer;
-                final long base = key.getBase();
-                buf.limit(buf.capacity());
-                buf.position(0);
-                int read = 0;
-                while(read < buf.capacity()) {
-                    read += channel.read(buf, base + read);
-                }
-
-                buf.flip();
-            }
-            catch(IOException e) {
-                throw new RuntimeException(e);
-            }
-            
-            return value;
-        }
-
-        public Value writeFully(final Key key, final Value value) {
-            try {
-                final ByteBuffer buf = value.buffer;
-                final long base = key.getBase();
-                buf.limit(buf.capacity());
-                buf.position(0);
-                int written = 0;
-                while(written < buf.capacity()) {
-                    written += channel.write(buf, base + written);
-                }
-
-                buf.flip();
-            }
-            catch(IOException e) {
-                throw new RuntimeException(e);
-            }
-
-            value.setDirty(false);
-            return value;
-        }
-
-        public void force() {
-            try {
-                channel.force(false);
-            }
-            catch(IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        public void close() {
-            try {
-                channel.close();
-            }
-            catch(IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-    }
-    
-    static abstract class Key {
-        abstract long getBase();
-        abstract Object getId();
+    public enum Locking { NONE, CHANNEL, POOL }
+        
+    static class Key {
+        final Object id;
+        final long base;
         
         @Override
         final public int hashCode() {
-            return 37 * Long.hashCode(getBase()) + getId().hashCode();
+            return 37 * Long.hashCode(base) + id.hashCode();
         }
             
         @Override
         final public boolean equals(final Object o) {
             final Key rhs = (Key) o;
-            return (getBase() == rhs.getBase()) && getId().equals(rhs.getId());
+            return (base == rhs.base) && id.equals(rhs.id);
         }
 
-        static class Mutable extends Key {
-            private long _base;
-            private Object _id;
-
-            Mutable setBase(final long val) { _base = val; return this; }
-            long getBase() { return _base; }
-
-            Mutable setId(final Object val) { _id = val; return this; }
-            Object getId() { return _id; }
+        public Key(final Object id, final long base) {
+            this.id = id;
+            this.base = base;
         }
 
-        static class Immutable extends Key {
-            private final long _base;
-            private final Object _id;
-                
-            public long getBase() { return _base; }
-            public Object getId() { return _id; }
-                
-            public Immutable(final Object id, final long base) {
-                _id = id;
-                _base = base;
-            }
-        }
-
-        private static final ThreadLocal<Mutable> _tl = ThreadLocal.withInitial(Mutable::new);
-
-        public static Mutable forSearch(final Object id, final long base) {
-            return _tl.get().setId(id).setBase(base);
-        }
-
-        public static Immutable forStorage(final Object id, final long base) {
-            return new Immutable(id, base);
+        public static Key make(final Object id, final long base) {
+            return new Key(id, base);
         }
     }
 
@@ -186,7 +80,7 @@ public class BufferPool {
         }
 
         protected long base(final long at) {
-            return at >>> shift;
+            return bufferSize * (at >>> shift);
         }
 
         protected void set(final Key key, final Value value) {
@@ -196,32 +90,33 @@ public class BufferPool {
         }
 
         protected Value fill(final Key key, final Value value) {
-            final PathChannel pc = channels.get(key.getId());
+            final PathChannel pc = channels.get(key.id);
             
-            if(key.getBase() + bufferSize > pc.size()) {
+            if(key.base + bufferSize > pc.size()) {
                 return handleExpansion(key, value);
             }
             else {
-                return pc.readFully(key, value);
+                pc.readFully(key.base, value.buffer);
+                return value;
             }
         }
 
         private ByteBuffer locate(final long at, final int length) {
             final long base = base(at);
-            if(currentKey.getBase() == base) {
+            if(currentKey.base == base) {
                 return currentValue.buffer;
             }
 
-            final Key newKey = Key.forStorage(currentKey.getId(), base);
+            final Key newKey = Key.make(currentKey.id, base);
             final Value loadedValue = buffers.get(newKey);
             if(loadedValue != null) {
                 set(newKey, loadedValue);
                 return loadedValue.buffer;
             }
             
-            Value newValue = new Value(ByteBuffer.allocate(bufferSize));
-            newValue = buffers.putIfAbsent(newKey, fill(newKey, newValue));
-            set(newKey, newValue);
+            final Value newValue = new Value(ByteBuffer.allocate(bufferSize));
+            final Value foundValue = buffers.putIfAbsent(newKey, fill(newKey, newValue));
+            set(newKey, foundValue == null ? newValue : foundValue);
             return newValue.buffer;
         }
 
@@ -260,13 +155,21 @@ public class BufferPool {
         }
     }
 
+    private static final long PARALLEL_THRESHOLD = 4L;
+    private static final Set<StandardOpenOption> OPTIONS =
+        EnumSet.of(StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+    
+    private final ConcurrentHashMap<Key,Value> buffers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Object,PathChannel> channels = new ConcurrentHashMap<>();
+
     private final int bufferSize;
     private final int maxBuffers;
     private final long shift;
     private final long mask;
+    private final Locking locking;
     private final ReadWriteLock rwLock;
     
-    public BufferPool(final int bufferSize, final int maxBuffers, final boolean threadSafe) {
+    public ChannelBuffers(final int bufferSize, final int maxBuffers, final Locking locking) {
         if(!Locator.powerOfTwo(bufferSize)) {
             throw new IllegalArgumentException("buffer size must be a power of two");
         }
@@ -275,7 +178,8 @@ public class BufferPool {
         this.maxBuffers = maxBuffers;
         this.shift = Locator.shift(bufferSize);
         this.mask = Locator.mask(bufferSize);
-        this.rwLock = threadSafe ? new ReentrantReadWriteLock() : FalseLock.rwLock();
+        this.locking = locking;
+        this.rwLock = (locking == Locking.POOL) ? new ReentrantReadWriteLock() : FalseLock.rwLock();
     }
 
     public int getBufferCount() {
@@ -303,12 +207,18 @@ public class BufferPool {
     public void createChannel(final Object id, final String path) {
         createChannel(id, Paths.get(path));
     }
+
+    public void createChannel(final Object id, final File file) {
+        createChannel(id, file.toPath());
+    }
     
     public void createChannel(final Object id, final Path path) {
+        final ReadWriteLock lock = (locking == Locking.CHANNEL) ? new ReentrantReadWriteLock() : FalseLock.rwLock();
+        
         channels.compute(id, (existingId, existingValue) -> {
                 try {
                     return (existingValue == null ?
-                            new PathChannel(path, FileChannel.open(path, OPTIONS)) :
+                            new PathChannel(path, FileChannel.open(path, OPTIONS), lock) :
                             existingValue);
                 }
                 catch(IOException e) {
@@ -319,7 +229,8 @@ public class BufferPool {
 
     private void flush(final Key key, final Value value) {
         if(value.isDirty()) {
-            channels.get(key.getId()).writeFully(key, value);
+            channels.get(key.id).writeFully(key.base, value.buffer);
+            value.setDirty(false);
         }
     }
 
@@ -347,25 +258,37 @@ public class BufferPool {
         }
     }
 
-    public MutableBytes forWrite(final Object id) {
-        rwLock.writeLock().lock();
+    private ReadWriteLock opLock(final Object id) {
+        switch(locking) {
+        case NONE: return FalseLock.rwLock();
+        case CHANNEL: return channels.get(id).rwLock;
+        case POOL: return rwLock;
+        default:
+            throw new IllegalStateException("unmatched locking enum");
+        }
+    }
 
-        final Key key = Key.forStorage(id, -1L);
+    public MutableBytes forWrite(final Object id) {
+        final Lock lock = opLock(id).writeLock();
+        lock.lock();
+
+        final Key key = Key.make(id, -1L);
         return new VectorIndexed.Mutable(new ForWrite(key)) {
             public void stop() {
-                rwLock.writeLock().unlock();
+                lock.unlock();
             }
         };
         
     }
 
     public ImmutableBytes forRead(final Object id) {
-        rwLock.readLock().lock();
+        final Lock lock = opLock(id).readLock();
+        lock.lock();
         
-        final Key key = Key.forStorage(id, -1L);
+        final Key key = Key.make(id, -1L);
         return new VectorIndexed.Mutable(new ForRead(key)) {
             public void stop() {
-                rwLock.readLock().unlock();
+                lock.unlock();
             }
         };
     }

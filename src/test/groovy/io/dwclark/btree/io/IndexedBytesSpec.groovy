@@ -4,8 +4,8 @@ import spock.lang.*
 import static java.nio.charset.StandardCharsets.UTF_8
 
 class IndexedBytesSpec extends Specification {
-
-    def "Basic Single Buffer Operations"() {
+    
+    def "basic single buffer operations"() {
         setup:
         
         def str = "this is a stupid string"
@@ -161,5 +161,54 @@ class IndexedBytesSpec extends Specification {
             assert read() == 2 as byte
             assert readDouble() == Double.MAX_VALUE
         }
+    }
+
+    def "channel buffers operations"() {
+        setup:
+
+        def id = "testing"
+        def str = "to be or not to be...that is the question"
+        def iVal = 400
+        def lVal = 500L
+        def file = File.createTempFile("test", ".bin");
+        def cb = new ChannelBuffers(8, 1_024, ChannelBuffers.Locking.NONE)
+        cb.createChannel(id, file)
+        def sb = new SerialMutableBytes(cb.forWrite(id))
+
+        when:
+        sb.with {
+            writeInt iVal
+            writeLong lVal
+            writeString "to be or not to be...that is the question"
+        }
+
+        int total = sb.writeAt
+
+        then:
+        sb.with {
+            assert readInt() == iVal
+            assert readLong() == lVal
+            assert readString() == str
+        }
+        
+        when:
+        sb.stop()
+        cb.shutdown()
+        cb = new ChannelBuffers(8, 1_024, ChannelBuffers.Locking.NONE)
+        cb.createChannel(id, file)
+        sb = new SerialImmutableBytes(cb.forRead(id))
+
+        then:
+
+        sb.with {
+            assert readInt() == iVal
+            assert readLong() == lVal
+            assert readString() == str
+            assert readAt == total
+        }
+        
+        cleanup:
+
+        file.delete();
     }
 }
