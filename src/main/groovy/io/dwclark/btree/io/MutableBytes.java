@@ -3,7 +3,7 @@ package io.dwclark.btree.io;
 import java.nio.charset.StandardCharsets;
 import java.nio.charset.Charset;
 
-interface MutableBytes extends ImmutableBytes {
+public interface MutableBytes extends ImmutableBytes {
 
     MutableBytes write(long at, byte val);
     MutableBytes write(long at, byte[] src, int off, int length);

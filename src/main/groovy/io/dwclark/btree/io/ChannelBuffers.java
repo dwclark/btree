@@ -292,4 +292,16 @@ public class ChannelBuffers {
             }
         };
     }
+
+    public ViewBytes viewBytes(final Object id) {
+        return new ViewBytes() {
+            public ImmutableBytes forRead() {
+                return ChannelBuffers.this.forRead(id);
+            }
+
+            public MutableBytes forWrite() {
+                return ChannelBuffers.this.forWrite(id);
+            }
+        };
+    }
 }

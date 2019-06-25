@@ -1,6 +1,6 @@
 package io.dwclark.btree.io;
 
-interface ViewBytes {
+public interface ViewBytes {
     ImmutableBytes forRead();
     MutableBytes forWrite();
 }
