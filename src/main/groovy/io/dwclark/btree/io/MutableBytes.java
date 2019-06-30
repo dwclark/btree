@@ -27,7 +27,12 @@ public interface MutableBytes extends ImmutableBytes {
     }
 
     default MutableBytes writeString(final long at, final String str, final Charset cs) {
-        StringBytes.encode(at, str, cs, this);
+        BulkBytes.encode(at, str, cs, this);
+        return this;
+    }
+
+    default MutableBytes copy(final long at, final ImmutableBytes src, final long srcAt, final int length) {
+        BulkBytes.copy(this, at, src, srcAt, length);
         return this;
     }
 }

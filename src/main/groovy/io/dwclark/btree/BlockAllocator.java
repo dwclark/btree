@@ -67,19 +67,19 @@ public class BlockAllocator {
 
         withUnused((u) -> { u.add(block); return u; });
     }
-
+    
     public long next() {
         return withLock(() -> {
-                if(_unused.isEmpty()) {
-                    if(max == _current) {
-                        throw new IllegalStateException("block allocator is exhausted");
-                    }
-                    else {
-                        return _current++;
-                    }
+                final Long val = _unused.pollFirst();
+                if(val != null) {
+                    return val.longValue();
+                }
+
+                if(max == _current) {
+                    throw new IllegalStateException("block allocator is exhausted");
                 }
                 
-                return _unused.pollFirst();
+                return _current++;
             });
     }
 }

@@ -211,4 +211,37 @@ class IndexedBytesSpec extends Specification {
 
         file.delete();
     }
+
+    def 'test non-overlapping copy'() {
+        setup:
+        def fb = new FixedBuffer(128, false)
+        def fw = fb.forWrite()
+        for(int i = 0; i < 128; ++i) {
+            fw.write((long) i, (byte) i)
+        }
+
+        fw.copy(64L, fw, 0, 64);
+
+        expect:
+        (0..63).every { i ->
+            fw.read(i) == fw.read(i+64)
+        }
+    }
+
+    def 'test overlapping copy'() {
+        setup:
+        def fb = new FixedBuffer(128, false)
+        def fw = fb.forWrite()
+        for(int i = 0; i < 128; ++i) {
+            fw.write((long) i, (byte) i)
+        }
+
+        fw.copy(32L, fw, 0, 64);
+
+        expect:
+        (0..<32).every { i -> fw.read(i) == i; }
+        (32..<(32+64)).every { i ->fw.read(i) == (i-32); }
+        (96..<128).every {i -> fw.read(i) == i; }
+        
+    }
 }

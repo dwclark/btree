@@ -35,7 +35,7 @@ public interface ImmutableBytes {
     }
 
     default String readString(final long at, final Charset cs) {
-        return StringBytes.decode(at, cs, this);
+        return BulkBytes.decode(at, cs, this);
     }
 
     default int stringLength(final long at) {
