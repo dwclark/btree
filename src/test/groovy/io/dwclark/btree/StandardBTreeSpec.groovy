@@ -7,15 +7,19 @@ import io.dwclark.btree.io.FixedBuffer
 
 class StandardBTreeSpec extends Specification {
 
-    def "test min degree computation"() {
-        expect:
-        findMinDegree(4096) == 102
-        findMinDegree(86) == 2
-    }
 
+    def "test buffer size for min degree"() {
+        expect:
+        bufferSizeForMinDegree(2) == 66
+        bufferSizeForMinDegree(3) == 106
+        findMinDegree(bufferSizeForMinDegree(2)) == 2
+        findMinDegree(bufferSizeForMinDegree(3)) == 3
+        findMinDegree(4096) == 102
+    }
+    
     def "test bad buffer size"() {
         when:
-        findMinDegree(85)
+        findMinDegree(65)
 
         then:
         thrown IllegalArgumentException
@@ -41,95 +45,208 @@ class StandardBTreeSpec extends Specification {
         setup:
         def bufferSize = 4_096
         def fb = new FixedBuffer(bufferSize, false)
-
+        def btree = new StandardBTree(bufferSize, fb);
+        
         when:
-        def bytes = fb.forWrite()
+        def node = btree.mutableRoot()
         
         then:
-        !leaf(bytes, 0L)
-        count(bytes, 0L) == 0
+        node.leaf()
+        node.count() == 0
 
         when:
-        leaf(bytes, 0L, true)
-        count(bytes, 0L, 125)
+        node.leaf(true)
+        node.count(125)
 
         then:
-        leaf(bytes, 0)
-        count(bytes, 0L) == 125
-        bytes.readShort(0L) < 0
+        node.leaf()
+        node.count() == 125
     }
 
     def "test place new b-tree manipulation methods"() {
         setup:
         def bufferSize = 4_096
         def fb = new FixedBuffer(bufferSize, false)
-        def bytes = fb.forWrite()
+        def btree = new StandardBTree(bufferSize, fb)
+        def node = btree.mutableRoot()
         (0..<13).each { key ->
-            placeNew(bytes, 0L, key, (long) key, key * 2L)
+            node.key(key).value(key *2L).incrementCount().incrementIndex();
         }
 
-        expect:
-        (0..<13).every { index -> key(bytes, 0L, index) == (long) index }
-        (0..<13).every { index -> value(bytes, 0L, index) == (2L * index) }
-        count(bytes, 0L) == 13
-    }
-
-    def "test key/value b-tree manipulation methods"() {
-        setup:
-        def bufferSize = 4_096
-        def fb = new FixedBuffer(bufferSize, false)
-        def bytes = fb.forWrite()
-        (0..<10).each { k ->
-            key(bytes, 0L, k, (long) k)
-            value(bytes, 0L, k, k * 2L)
-        }
+        when:
+        node.index(0)
         
-        expect:
-        (0..<10).every { index -> key(bytes, 0L, index) == (long) index }
-        (0..<10).every { index -> value(bytes, 0L, index) == (2L * index) }
+        then:
+        node.count() == 13
+        (0..<13).every { index ->
+            node.key() == (long) index && node.value() == (2L * index)
+            node.incrementIndex()
+        }
     }
 
     def "test child placement methods"() {
         setup:
         def bufferSize = 4_096
         def fb = new FixedBuffer(bufferSize, false)
-        def bytes = fb.forWrite()
-        (0..<13).each { key ->
-            placeNew(bytes, 0L, key, (long) key, key * 2L)
-        }
-
+        def btree = new StandardBTree(bufferSize, fb)
+        def node = btree.mutableRoot()
+        
         when:
-        (0..13).each { index -> child(bytes, 0L, index, index * 3) }
+        (0..13).each { index -> node.child(index).incrementIndex() }
+        node.index(0)
 
         then:
-        (0..13).every { index -> child(bytes, 0L, index) == index * 3 }   
+        (0..13).each { index ->
+            assert node.child() == index
+            node.incrementIndex()
+        }
     }
 
     def "test shift"() {
         setup:
         def bufferSize = 4_096
         def fb = new FixedBuffer(bufferSize, false)
-        def bytes = fb.forWrite()
+        def btree = new StandardBTree(bufferSize, fb)
+        def node = btree.mutableRoot()
+        
         (0..<13).each { idx ->
-            placeNew(bytes, 0L, idx, (long) idx, idx * 2L)
-            child(bytes, 0L, idx, idx * 3)
+            node.key(idx).value(idx * 2L).child(idx * 3).incrementCount().incrementIndex()
         }
-
-        child(bytes, 0L, 13, 13 * 3)
+        
+        node.child(13 * 3)
+        node.index(0)
 
         when:
-        shiftRecord(bytes, 0L, 0)
-        placeNew(bytes, 0L, 0, (long) Integer.MAX_VALUE, (long) Integer.MAX_VALUE)
-        child(bytes, 0L, 0, Integer.MAX_VALUE)
+        node.rightShift()
+        node.key((long) Integer.MAX_VALUE).value((long) Integer.MAX_VALUE)
+            .child(Integer.MAX_VALUE).incrementCount()
+        node.index(1)
 
         then:
-        count(bytes, 0L) == 14
-        (1..13).every { idx -> key(bytes, 0L, idx) == idx - 1 }
-        (1..13).every { idx -> value(bytes, 0L, idx) == (idx-1) * 2 }
-        (1..13).every { idx -> child(bytes, 0L, idx) == (idx-1) * 3 }
-        child(bytes, 0L, 14) == 39
-        child(bytes, 0L, 0) == Integer.MAX_VALUE
-        key(bytes, 0L, 0) == Integer.MAX_VALUE
-        value(bytes, 0L, 0) == Integer.MAX_VALUE
+        node.count() == 14
+        (1..13).each { idx ->
+            assert(node.key() == idx - 1)
+            assert(node.value() == (idx-1) * 2)
+            assert (node.child() == (idx-1) * 3)
+            node.incrementIndex()
+        }
+        
+        
+        node.child() == 39
+        node.index(0).child() == Integer.MAX_VALUE
+        node.key() == Integer.MAX_VALUE
+        node.value() == Integer.MAX_VALUE
+    }
+    
+    def 'test insert and search single'() {
+        setup:
+        def bufferSize = 1024;
+        def fb = new FixedBuffer(bufferSize, false);
+        def btree = new StandardBTree(bufferSize, fb);
+
+        when:
+        btree.insert 1L, 2L
+
+        then:
+        btree.search(1L) == 2L;
+    }
+
+    def 'test 2-3-4 tree'() {
+        setup:
+        def bufferSize = StandardBTree.bufferSizeForMinDegree(2)
+        def fb = new FixedBuffer(4_096, false);
+        def btree = new StandardBTree(bufferSize, fb);
+
+        when:
+        (1L..20L).each { btree.insert(it, it * 2L) }
+        
+
+        then:
+        (1L..20L).each { btree.search(it) == it * 2L }
+        //println btree.toString()
+    }
+
+    public List<String> toStrs(final List list) {
+        list.collect { node ->
+            node.keys().inject("") { str, lng -> str += (lng as char) as String } }
+    }
+
+    def 'test book insert example'() {
+        setup:
+        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def fb = new FixedBuffer(4_096, false)
+        def btree = new StandardBTree(bufferSize, fb)
+        def root = btree.mutableRoot().leaf(false)
+        [ 'g', 'm', 'p', 'x' ].each { s ->
+            root.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def w = fb.forWrite()
+        def node1 = btree.nextNode(w)
+        [ 'a', 'c', 'd', 'e' ].each { s ->
+            node1.with {
+                key((s as char) as long)
+                value((s as char) as long)
+                incrementCount()
+                incrementIndex()
+            }
+        }
+
+        def node2 = btree.nextNode(w).leaf(true)
+        [ 'j', 'k' ].each { s ->
+            node2.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node3 = btree.nextNode(w).leaf(true)
+        [ 'n', 'o' ].each { s ->
+            node3.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node4 = btree.nextNode(w).leaf(true)
+        [ 'r', 's', 't', 'u', 'v' ].each { s ->
+            node4.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node5 = btree.nextNode(w).leaf(true)
+        [ 'y', 'z' ].each { s ->
+            node5.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        when:
+        root.with {
+            index(0)
+            leftChild(node1).incrementIndex()
+            leftChild(node2).incrementIndex()
+            leftChild(node3).incrementIndex()
+            leftChild(node4).incrementIndex()
+            leftChild(node5)
+        }
+
+        then:
+        toStrs(btree.breadthFirst()) == [ 'gmpx', 'acde', 'jk', 'no', 'rstuv', 'yz' ]
+
+        when:
+        btree.insert(('b' as char) as long, ('b' as char) as long)
+
+        then:
+        toStrs(btree.breadthFirst()) == [ 'gmpx', 'abcde', 'jk', 'no', 'rstuv', 'yz' ]
+
+        when:
+        btree.insert(('q' as char) as long, ('q' as char) as long)
+
+        then:
+        toStrs(btree.breadthFirst()) == [ 'gmptx', 'abcde', 'jk', 'no', 'qrs', 'uv', 'yz' ]
+
+        when:
+        btree.insert(('l' as char) as long, ('l' as char) as long)
+
+        then:
+        toStrs(btree.breadthFirst()) == [ 'p', 'gm', 'tx', 'abcde', 'jkl', 'no', 'qrs', 'uv', 'yz' ]
+
+        when:
+        btree.insert(('f' as char) as long, ('f' as char) as long)
+
+        then:
+        toStrs(btree.breadthFirst()) == [ 'p', 'cgm', 'tx', 'ab', 'def', 'jkl', 'no', 'qrs', 'uv', 'yz' ]
     }
 }
