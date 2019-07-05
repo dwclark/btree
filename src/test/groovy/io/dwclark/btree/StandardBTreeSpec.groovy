@@ -163,7 +163,6 @@ class StandardBTreeSpec extends Specification {
 
         then:
         (1L..20L).each { btree.search(it) == it * 2L }
-        //println btree.toString()
     }
 
     public List<String> toStrs(final List list) {
@@ -248,5 +247,96 @@ class StandardBTreeSpec extends Specification {
 
         then:
         toStrs(btree.breadthFirst()) == [ 'p', 'cgm', 'tx', 'ab', 'def', 'jkl', 'no', 'qrs', 'uv', 'yz' ]
+    }
+
+    def 'test leaf based removal'() {
+        setup:
+        def bufferSize = 4_096
+        def fb = new FixedBuffer(bufferSize, false)
+        def btree = new StandardBTree(bufferSize, fb)
+        (1L..10L).each { btree.insert it, it }
+        def toRemove = (1L..10L).toList()
+        Collections.shuffle(toRemove)
+
+        expect:
+        toRemove.every { lng ->
+            def found = btree.search(lng) != -1L;
+            btree.remove(lng);
+            found && btree.search(lng) == -1L
+        }
+    }
+
+    def 'test book remove example'() {
+        setup:
+        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def fb = new FixedBuffer(4_096, false)
+        def btree = new StandardBTree(bufferSize, fb)
+        def root = btree.mutableRoot().leaf(false)
+        def w = fb.forWrite()
+        
+        [ 'p' ].each { s ->
+            root.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def level2_1 = btree.nextNode(w).leaf(false)
+        [ 'c', 'g', 'm' ].each { s ->
+            level2_1.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def level2_2 = btree.nextNode(w).leaf(false)
+        [ 't', 'x' ].each { s ->
+            level2_2.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+        
+        def level3_1 = btree.nextNode(w).leaf(true)
+        [ 'a', 'b' ].each { s ->
+            level3_1.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def level3_2 = btree.nextNode(w).leaf(true)
+        [ 'd', 'e', 'f' ].each { s ->
+            level3_2.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+        
+        def level3_3 = btree.nextNode(w).leaf(true)
+        [ 'j', 'k', 'l' ].each { s ->
+            level3_3.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def level3_4 = btree.nextNode(w).leaf(true)
+        [ 'n', 'o' ].each { s ->
+            level3_4.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def level3_5 = btree.nextNode(w).leaf(true)
+        [ 'q', 'r', 's' ].each { s ->
+            level3_5.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def level3_6 = btree.nextNode(w).leaf(true)
+        [ 'u', 'v' ].each { s ->
+            level3_6.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def level3_7 = btree.nextNode(w).leaf(true)
+        [ 'y', 'z' ].each { s ->
+            level3_7.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        when:
+        root.index(0).leftChild(level2_1).rightChild(level2_2)
+        level2_1.index(0).leftChild(level3_1).index(1).leftChild(level3_2)
+        level2_1.index(2).leftChild(level3_3).index(3).leftChild(level3_4)
+        level2_2.index(0).leftChild(level3_5).index(1).leftChild(level3_6)
+        level2_2.index(2).leftChild(level3_7);
+
+        then:
+        toStrs(btree.breadthFirst()) == ['p', 'cgm', 'tx', 'ab', 'def', 'jkl', 'no', 'qrs', 'uv', 'yz']
+
+        when:
+        btree.remove(('f' as char) as long)
+        
+        then:
+        toStrs(btree.breadthFirst()) == ['p', 'cgm', 'tx', 'ab', 'de', 'jkl', 'no', 'qrs', 'uv', 'yz']
     }
 }

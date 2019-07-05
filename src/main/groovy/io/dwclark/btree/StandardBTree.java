@@ -1,14 +1,15 @@
 package io.dwclark.btree;
 
-import io.dwclark.btree.io.ViewBytes;
 import io.dwclark.btree.io.ImmutableBytes;
 import io.dwclark.btree.io.MutableBytes;
-import java.util.List;
-import java.util.LinkedList;
+import io.dwclark.btree.io.ViewBytes;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 import java.util.Set;
-import java.util.HashSet;
+import java.util.function.Function;
 
 public class StandardBTree {
 
@@ -208,10 +209,26 @@ public class StandardBTree {
             return new MutableNode(bytes, leftChild());
         }
 
+        public MutableNode leftSiblingNode() {
+            if(index == 0) {
+                return null;
+            }
+            else {
+                return new MutableNode(bytes, bytes.readInt(pos - ENTRY_SIZE));
+            }
+        }
+
         @Override
         public MutableNode rightChildNode() {
-            return new MutableNode(bytes, rightChild());
+            if(index == count()) {
+                return null;
+            }
+            else {
+                return new MutableNode(bytes, rightChild());
+            }
         }
+
+        
 
         public MutableNode leaf(final boolean val) {
             final short now = bytes.readShort(base);
@@ -235,6 +252,10 @@ public class StandardBTree {
 
         public MutableNode incrementCount() {
             return count(count + 1);
+        }
+
+        public MutableNode decrementCount() {
+            return count(count - 1);
         }
 
         public MutableNode child(final int val) {
@@ -326,7 +347,6 @@ public class StandardBTree {
     }
 
     private void merge(final MutableNode parent) {
-        final int restoreIndex = parent.index;
         final MutableBytes bytes = parent.bytes;
         final MutableNode leftChild = parent.leftChildNode();
         final MutableNode rightChild = parent.rightChildNode();
@@ -335,13 +355,21 @@ public class StandardBTree {
             throw new IllegalStateException("attempting illegal merge");
         }
 
+        //copy parent value in
         leftChild.index(minKeys);
-        bytes.copy(leftChild.pos, bytes, rightChild.pos, (minKeys * ENTRY_SIZE) + POINTER_SIZE);
-        leftChild.count(2 * minKeys);
+        leftChild.key(parent.key());
+        leftChild.value(parent.value());
+        leftChild.incrementIndex();
 
-        parent.leftShift().decrementIndex();
+        //move right child into left child, deallocate right child
+        bytes.copy(leftChild.pos, bytes, rightChild.pos, (minKeys * ENTRY_SIZE) + POINTER_SIZE);
+        leftChild.count(1 + (2 * minKeys));
+        allocator.unused(rightChild.node);
+
+        //remove value from parent
+        parent.incrementIndex();
+        parent.leftShift().decrementCount().decrementIndex();
         parent.leftChild(leftChild);
-        parent.index(restoreIndex);
     }
 
     private void insertNotFull(final MutableNode node, final long key, final long value) {
@@ -368,11 +396,10 @@ public class StandardBTree {
         }
     }
 
-    private void insert(final MutableBytes bytes, final long key, final long value) {
-        final MutableNode rootNode = new MutableNode(bytes, root);
+    private void insert(final MutableNode rootNode, final long key, final long value) {
         if(rootNode.count() == maxKeys) {
             //root is full, need to split it and then call insertNonFull on the new root
-            final MutableNode newRoot = nextNode(bytes);
+            final MutableNode newRoot = nextNode(rootNode.bytes);
             this.root = newRoot.node;
             newRoot.leaf(false);
             newRoot.count(0);
@@ -384,13 +411,120 @@ public class StandardBTree {
             insertNotFull(rootNode, key, value);
         }
     }
-
+    
     public void insert(final long key, final long value) {
-        viewBytes.withWrite((bytes) -> { insert(bytes, key, value); });
+        viewBytes.withWrite((bytes) -> { insert(new MutableNode(bytes, root), key, value); });
+    }
+
+    private boolean removeLeaf(final MutableNode node, final long key) {
+        if(node.find(key)) {
+            node.incrementIndex();
+            node.leftShift().decrementCount();
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+
+    private void removeInnerNode(final MutableNode node, final long key) {
+        final MutableNode left = node.leftChildNode();
+        final MutableNode right = node.rightChildNode();
+
+        if(left.count() >= minDegree) {
+            left.index(left.count() - 1);
+            final long predecessorKey = left.key();
+            final long predecessorValue = left.value();
+            remove(left, predecessorKey);
+            node.key(predecessorKey);
+            node.value(predecessorValue);
+        }
+        else if(right.count() >= minDegree) {
+            right.index(0);
+            final long successorKey = right.key();
+            final long successorValue = right.value();
+            remove(right, successorKey);
+            node.key(right.key());
+            node.value(right.value());
+        }
+        else {
+            merge(node);
+            node.find(key);
+            remove(node.leftChildNode(), key);
+        }
+    }
+
+    private void fixUpChildren(final MutableNode parent, final long key) {
+        final MutableNode child = parent.leftChildNode();
+        final MutableNode leftSibling = parent.leftSiblingNode();
+        final MutableNode rightSibling = parent.rightChildNode();
+        if(leftSibling != null && leftSibling.count() > minKeys) {
+            leftSibling.index(leftSibling.count() - 1);
+            final long leftKey = leftSibling.key();
+            final long leftValue = leftSibling.value();
+            leftSibling.incrementIndex();
+            leftSibling.leftShift().decrementCount();
+
+            child.rightShift().key(parent.key()).value(parent.value()).incrementCount();
+            
+            parent.key(leftKey).value(leftValue);
+            
+        }
+        else if(rightSibling != null && rightSibling.count() > minKeys) {
+            final long rightKey = rightSibling.key();
+            final long rightValue = rightSibling.value();
+            rightSibling.incrementIndex();
+            rightSibling.leftShift().decrementCount();
+
+            child.index(child.count());
+            child.rightShift().key(parent.key()).value(parent.value()).incrementCount();
+
+            parent.key(rightKey).value(rightValue);
+        }
+        else if(leftSibling != null) {
+            parent.decrementIndex();
+            merge(parent);
+            parent.find(key);
+        }
+        else {
+            merge(parent);
+            parent.find(key);
+        }
     }
     
-    public void remove(final long key) {
+    private boolean remove(final MutableNode node, final long key) {
+        if(node.leaf()) {
+            return removeLeaf(node, key);
+        }
+        else {
+            if(node.find(key)) {
+                removeInnerNode(node, key);
+                return true;
+            }
+
+            final MutableNode child = node.leftChildNode();
+            if(child.count() > minKeys) {
+                return remove(child, key);
+            }
+
+            fixUpChildren(node, key);
+            return remove(node.leftChildNode(), key);
+        }
+    }
+
+    public boolean remove(final long key) {
+        final Function<MutableBytes,Boolean> func = (MutableBytes bytes) -> {
+            final MutableNode rootNode = new MutableNode(bytes, root);
+            final Boolean ret = Boolean.valueOf(remove(rootNode, key));
+            if(rootNode.count() == 0) {
+                this.root = rootNode.leftChild();
+                allocator.unused(rootNode.node);
+            }
+
+            return ret;
+        };
         
+        return viewBytes.withWrite(func).booleanValue();
     }
 
     private void toString(final StringBuilder sb, final ImmutableNode node) {
