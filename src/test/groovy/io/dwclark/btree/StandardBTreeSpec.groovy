@@ -273,7 +273,7 @@ class StandardBTreeSpec extends Specification {
         def btree = new StandardBTree(bufferSize, fb)
         def root = btree.mutableRoot().leaf(false)
         def w = fb.forWrite()
-        
+       
         [ 'p' ].each { s ->
             root.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
         }
@@ -287,7 +287,7 @@ class StandardBTreeSpec extends Specification {
         [ 't', 'x' ].each { s ->
             level2_2.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
         }
-        
+       
         def level3_1 = btree.nextNode(w).leaf(true)
         [ 'a', 'b' ].each { s ->
             level3_1.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
@@ -297,7 +297,7 @@ class StandardBTreeSpec extends Specification {
         [ 'd', 'e', 'f' ].each { s ->
             level3_2.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
         }
-        
+       
         def level3_3 = btree.nextNode(w).leaf(true)
         [ 'j', 'k', 'l' ].each { s ->
             level3_3.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
@@ -334,9 +334,54 @@ class StandardBTreeSpec extends Specification {
         toStrs(btree.breadthFirst()) == ['p', 'cgm', 'tx', 'ab', 'def', 'jkl', 'no', 'qrs', 'uv', 'yz']
 
         when:
-        btree.remove(('f' as char) as long)
-        
+        def removed = btree.remove(('f' as char) as long)
+       
         then:
+        removed
         toStrs(btree.breadthFirst()) == ['p', 'cgm', 'tx', 'ab', 'de', 'jkl', 'no', 'qrs', 'uv', 'yz']
+
+        when:
+        removed = btree.remove(('m' as char) as long)
+
+        then:
+        removed
+        toStrs(btree.breadthFirst()) == ['p', 'cgl', 'tx', 'ab', 'de', 'jk', 'no', 'qrs', 'uv', 'yz']
+
+        when:
+        removed = btree.remove(('g' as char) as long)
+
+        then:
+        removed
+        toStrs(btree.breadthFirst()) == ['p', 'cl', 'tx', 'ab', 'dejk', 'no', 'qrs', 'uv', 'yz']
+
+        when:
+        removed = btree.remove(('d' as char) as long)
+
+        then:
+        removed
+        toStrs(btree.breadthFirst()) == ['clptx', 'ab', 'ejk', 'no', 'qrs', 'uv', 'yz']
+
+        when:
+        removed = btree.remove(('b' as char) as long)
+
+        then:
+        removed
+        toStrs(btree.breadthFirst()) == ['elptx', 'ac', 'jk', 'no', 'qrs', 'uv', 'yz']
+    }
+
+    def 'test basic to string'() {
+        setup:
+        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def fb = new FixedBuffer(4_096, false)
+        def btree = new StandardBTree(bufferSize, fb)
+        btree.insert(1L, 2L)
+        btree.insert(3L, 4L)
+        btree.insert(5L, 6L)
+        btree.insert(7L, 8L)
+        def str = btree.toString();
+
+        expect:
+        str
+        (1..8).every { str.contains(it as String) }
     }
 }

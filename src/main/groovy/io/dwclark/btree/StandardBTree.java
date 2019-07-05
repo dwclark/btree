@@ -444,8 +444,8 @@ public class StandardBTree {
             final long successorKey = right.key();
             final long successorValue = right.value();
             remove(right, successorKey);
-            node.key(right.key());
-            node.value(right.value());
+            node.key(successorKey);
+            node.value(successorValue);
         }
         else {
             merge(node);
