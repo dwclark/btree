@@ -38,7 +38,6 @@ public class StandardBTree {
     public int getMaxKeys() { return maxKeys; }
     public int getMaxChildren() { return maxChildren; }
     public int getRoot() { return root; }
-    public long getRootBase() { return ((long) bufferSize) * root; }
 
     public StandardBTree(final int bufferSize, final int root,
                          final ViewBytes viewBytes, final BlockAllocator allocator) {
@@ -74,35 +73,32 @@ public class StandardBTree {
     }
     
     protected MutableNode nextNode(final MutableBytes bytes) {
-        return new MutableNode(bytes, (int) allocator.next()).leaf(true);
+        return new MutableNode(bytes, (int) allocator.next(), bufferSize).leaf(true);
     }
 
-    public class ImmutableNode<T extends ImmutableBytes> {
-        int node;
-        T bytes;
-        long base;
-        boolean leaf;
-        int count;
-        int index;
+    public static class ImmutableNode<T extends ImmutableBytes> {
         long pos;
+        long base;
+        int bufferSize;
+        int node;
+        int index;
+        int count;
+        boolean leaf;
+        T bytes;
         
-        public ImmutableNode(final T bytes, final int node) {
+        public ImmutableNode(final T bytes, final int node, final int bufferSize) {
+            this.bufferSize = bufferSize;
             this.bytes = bytes;
-            init(node);
-        }
-        
-        private ImmutableNode init(final int node) {
             this.node = node;
             this.base = ((long) (0xFFFF_FFFFL & node)) * ((long) bufferSize);
             this.count = bytes.readShort(base) & 0x7FFF;
             this.leaf = 0 != (bytes.readShort(base) & 0x8000);
             this.index = 0;
             this.pos = base + COUNT_SIZE;
-            return this;
         }
 
         public ImmutableNode childNode() {
-            return new ImmutableNode(bytes, child());
+            return new ImmutableNode(bytes, child(), bufferSize);
         }
 
         public ImmutableNode rightChildNode() {
@@ -110,12 +106,12 @@ public class StandardBTree {
                 return null;
             }
             else {
-                return new ImmutableNode(bytes, rightChild());
+                return new ImmutableNode(bytes, rightChild(), bufferSize);
             }
         }
 
         public ImmutableNode leftChildNode() {
-            return new ImmutableNode(bytes, leftChild());
+            return new ImmutableNode(bytes, leftChild(), bufferSize);
         }
 
         public ImmutableNode index(int index) {
@@ -199,19 +195,19 @@ public class StandardBTree {
         }
     }
 
-    public class MutableNode extends ImmutableNode<MutableBytes> {
-        MutableNode(final MutableBytes bytes, int node) {
-            super(bytes, node);
+    public static class MutableNode extends ImmutableNode<MutableBytes> {
+        MutableNode(final MutableBytes bytes, final int node, final int bufferSize) {
+            super(bytes, node, bufferSize);
         }
 
         @Override
         public MutableNode childNode() {
-            return new MutableNode(bytes, child());
+            return new MutableNode(bytes, child(), bufferSize);
         }
 
         @Override
         public MutableNode leftChildNode(){
-            return new MutableNode(bytes, leftChild());
+            return new MutableNode(bytes, leftChild(), bufferSize);
         }
 
         public MutableNode leftSiblingNode() {
@@ -219,7 +215,7 @@ public class StandardBTree {
                 return null;
             }
             else {
-                return new MutableNode(bytes, bytes.readInt(pos - ENTRY_SIZE));
+                return new MutableNode(bytes, bytes.readInt(pos - ENTRY_SIZE), bufferSize);
             }
         }
 
@@ -229,11 +225,9 @@ public class StandardBTree {
                 return null;
             }
             else {
-                return new MutableNode(bytes, rightChild());
+                return new MutableNode(bytes, rightChild(), bufferSize);
             }
         }
-
-        
 
         public MutableNode leaf(final boolean val) {
             final short now = bytes.readShort(base);
@@ -327,7 +321,8 @@ public class StandardBTree {
     }
     
     public long search(final long key) {
-        return viewBytes.withRead((bytes) -> { return search(new ImmutableNode(bytes, root), key); });
+        return viewBytes.withRead((bytes) -> {
+                return search(new ImmutableNode(bytes, root, bufferSize), key); });
     }
 
     private void split(final MutableNode parent) {
@@ -418,7 +413,7 @@ public class StandardBTree {
     }
     
     public void insert(final long key, final long value) {
-        viewBytes.withWrite((bytes) -> { insert(new MutableNode(bytes, root), key, value); });
+        viewBytes.withWrite((bytes) -> { insert(new MutableNode(bytes, root, bufferSize), key, value); });
     }
 
     private boolean removeLeaf(final MutableNode node, final long key) {
@@ -519,7 +514,7 @@ public class StandardBTree {
 
     public boolean remove(final long key) {
         final Function<MutableBytes,Boolean> func = (MutableBytes bytes) -> {
-            final MutableNode rootNode = new MutableNode(bytes, root);
+            final MutableNode rootNode = new MutableNode(bytes, root, bufferSize);
             final Boolean ret = Boolean.valueOf(remove(rootNode, key));
             if(rootNode.count() == 0) {
                 this.root = rootNode.leftChild();
@@ -558,7 +553,7 @@ public class StandardBTree {
 
     public String toString() {
         final StringBuilder sb = new StringBuilder();
-        viewBytes.withRead((bytes) -> { toString(sb, new ImmutableNode(bytes, root)); });
+        viewBytes.withRead((bytes) -> { toString(sb, new ImmutableNode(bytes, root, bufferSize)); });
         return sb.toString();
     }
 
@@ -567,7 +562,7 @@ public class StandardBTree {
         final Queue<Integer> traversal = new LinkedList<>();
         traversal.offer(root);
         while(!traversal.isEmpty()) {
-            final ImmutableNode node = new ImmutableNode(bytes, traversal.poll());
+            final ImmutableNode node = new ImmutableNode(bytes, traversal.poll(), bufferSize);
             ret.add(node);
             if(!node.leaf()) {
                 while(node.index <= node.count) {
@@ -585,10 +580,10 @@ public class StandardBTree {
     }
 
     protected MutableNode mutableRoot() {
-        return new MutableNode(viewBytes.forWrite(), root);
+        return new MutableNode(viewBytes.forWrite(), root, bufferSize);
     }
 
     protected ImmutableNode immutableRoot() {
-        return new ImmutableNode(viewBytes.forRead(), root);
+        return new ImmutableNode(viewBytes.forRead(), root, bufferSize);
     }
 }

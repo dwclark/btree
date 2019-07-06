@@ -38,7 +38,6 @@ class StandardBTreeSpec extends Specification {
         btree.maxKeys == 203
         btree.maxChildren == 204
         btree.root == 0
-        btree.rootBase == 0L
     }
 
     def "test leaf/count b-tree manipulation methods"() {
