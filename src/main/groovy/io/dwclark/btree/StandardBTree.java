@@ -106,7 +106,12 @@ public class StandardBTree {
         }
 
         public ImmutableNode rightChildNode() {
-            return new ImmutableNode(bytes, rightChild());
+            if(index == count()) {
+                return null;
+            }
+            else {
+                return new ImmutableNode(bytes, rightChild());
+            }
         }
 
         public ImmutableNode leftChildNode() {
@@ -465,10 +470,10 @@ public class StandardBTree {
             leftSibling.incrementIndex();
             leftSibling.leftShift().decrementCount();
 
+            parent.decrementIndex();
             child.rightShift().key(parent.key()).value(parent.value()).incrementCount();
-            
             parent.key(leftKey).value(leftValue);
-            
+            parent.incrementIndex();
         }
         else if(rightSibling != null && rightSibling.count() > minKeys) {
             final long rightKey = rightSibling.key();

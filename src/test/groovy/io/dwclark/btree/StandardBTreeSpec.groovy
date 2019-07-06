@@ -170,6 +170,11 @@ class StandardBTreeSpec extends Specification {
             node.keys().inject("") { str, lng -> str += (lng as char) as String } }
     }
 
+    public List<String> valsToStrs(final List list) {
+        list.collect { node ->
+            node.values().inject("") { str, lng -> str += (lng as char) as String } }
+    }
+
     def 'test book insert example'() {
         setup:
         def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
@@ -246,7 +251,7 @@ class StandardBTreeSpec extends Specification {
         btree.insert(('f' as char) as long, ('f' as char) as long)
 
         then:
-        toStrs(btree.breadthFirst()) == [ 'p', 'cgm', 'tx', 'ab', 'def', 'jkl', 'no', 'qrs', 'uv', 'yz' ]
+        valsToStrs(btree.breadthFirst()) == [ 'p', 'cgm', 'tx', 'ab', 'def', 'jkl', 'no', 'qrs', 'uv', 'yz' ]
     }
 
     def 'test leaf based removal'() {
@@ -356,7 +361,7 @@ class StandardBTreeSpec extends Specification {
 
         when:
         removed = btree.remove(('d' as char) as long)
-
+        
         then:
         removed
         toStrs(btree.breadthFirst()) == ['clptx', 'ab', 'ejk', 'no', 'qrs', 'uv', 'yz']
@@ -383,5 +388,141 @@ class StandardBTreeSpec extends Specification {
         expect:
         str
         (1..8).every { str.contains(it as String) }
+    }
+
+    def 'test remove missing'() {
+        setup:
+        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def fb = new FixedBuffer(4_096, false)
+        def btree = new StandardBTree(bufferSize, fb)
+        btree.insert(1L, 2L)
+        btree.insert(3L, 4L)
+        btree.insert(5L, 6L)
+        btree.insert(7L, 8L)
+
+        expect:
+        !btree.remove(10L)
+        !btree.remove(100L);
+    }
+
+    def 'test update'() {
+        setup:
+        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def fb = new FixedBuffer(4_096, false)
+        def btree = new StandardBTree(bufferSize, fb)
+        btree.insert(1L, 2L)
+        btree.insert(3L, 4L)
+        btree.insert(5L, 6L)
+        btree.insert(7L, 8L)
+
+        when:
+        btree.insert 7L, 17L
+
+        then:
+        btree.search(7L) == 17L;
+    }
+
+    def 'misc inner node remove (missing from book example)'() {
+        setup:
+        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def fb = new FixedBuffer(4_096, false)
+        def btree = new StandardBTree(bufferSize, fb)
+        def root = btree.mutableRoot().leaf(false)
+        def w = fb.forWrite()
+       
+        [ 'g', 'k', 'n' ].each { s ->
+            root.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node1 = btree.nextNode(w).leaf(true)
+        [ 'a', 'b' ].each { s ->
+            node1.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node2 = btree.nextNode(w).leaf(true)
+        [ 'h', 'i' ].each { s ->
+            node2.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node3 = btree.nextNode(w).leaf(true)
+        [ 'l', 'm' ].each { s ->
+            node3.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node4 = btree.nextNode(w).leaf(true)
+        [ 'o', 'p', 'q' ].each { s ->
+            node4.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        when:
+        root.with {
+            index(0)
+            leftChild(node1).incrementIndex().leftChild(node2).incrementIndex()
+            leftChild(node3).incrementIndex().leftChild(node4)
+        }
+
+        then:
+        toStrs(btree.breadthFirst()) == ['gkn', 'ab', 'hi', 'lm', 'opq' ]
+        btree.toString() != null;
+
+        when:
+        def removed = btree.remove(('n' as char) as long)
+
+        then:
+        removed
+        toStrs(btree.breadthFirst()) == ['gko', 'ab', 'hi', 'lm', 'pq' ]
+        
+    }
+
+    def 'misc inner node remove 2 (missing from book example)'() {
+        setup:
+        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def fb = new FixedBuffer(4_096, false)
+        def btree = new StandardBTree(bufferSize, fb)
+        def root = btree.mutableRoot().leaf(false)
+        def w = fb.forWrite()
+       
+        [ 'g', 'k' ].each { s ->
+            root.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node1 = btree.nextNode(w).leaf(true)
+        [ 'a', 'b', 'c' ].each { s ->
+            node1.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node2 = btree.nextNode(w).leaf(true)
+        [ 'h', 'i' ].each { s ->
+            node2.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        def node3 = btree.nextNode(w).leaf(true)
+        [ 'l', 'm' ].each { s ->
+            node3.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
+        }
+
+        when:
+        root.with {
+            index(0)
+            leftChild(node1).incrementIndex()
+            leftChild(node2).incrementIndex()
+            leftChild(node3)
+        }
+
+        then:
+        toStrs(btree.breadthFirst()) == [ 'gk', 'abc', 'hi', 'lm' ]
+
+        when:
+        def removed = btree.remove(('i' as char) as long)
+
+        then:
+        toStrs(btree.breadthFirst()) == [ 'ck', 'ab', 'gh', 'lm' ]
+
+        when:
+        removed = btree.remove(('g' as char) as long)
+
+        then:
+        toStrs(btree.breadthFirst()) == [ 'k', 'abch', 'lm' ]
+
     }
 }
