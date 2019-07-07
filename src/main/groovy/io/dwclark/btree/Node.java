@@ -3,8 +3,6 @@ package io.dwclark.btree;
 import io.dwclark.btree.io.ImmutableBytes;
 import io.dwclark.btree.io.MutableBytes;
 import io.dwclark.btree.io.ViewBytes;
-import io.dwclark.btree.io.MutableBytes;
-import io.dwclark.btree.io.ViewBytes;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -18,10 +16,7 @@ public class Node {
         return CHILD_SIZE + keyRecord.size() + valueRecord.size();
     }
 
-    public static class Immutable<T extends ImmutableBytes> {
-
-        protected static final LongRecord keyRecord = LongRecord.instance();
-        protected static final LongRecord valueRecord = LongRecord.instance();
+    public static class Immutable<K,V> {
 
         public final int keySize() {
             return keyRecord.size();
@@ -34,7 +29,10 @@ public class Node {
         public final int entrySize() {
             return Node.entrySize(keyRecord, valueRecord);
         }
-        
+
+        protected ImmutableBytes bytes;
+        protected Record<K> keyRecord;
+        protected Record<V> valueRecord;
         protected long pos;
         protected long base;
         protected int bufferSize;
@@ -42,12 +40,15 @@ public class Node {
         protected int index;
         protected int count;
         protected boolean leaf;
-        protected T bytes;
         
-        public Immutable(final T bytes, final int node, final int bufferSize) {
-            this.bufferSize = bufferSize;
+        public Immutable(final ImmutableBytes bytes, final Record<K> keyRecord, final Record<V> valueRecord,
+                         final int node, final int bufferSize) {
             this.bytes = bytes;
+            this.keyRecord = keyRecord;
+            this.valueRecord = valueRecord;
             this.node = node;
+            this.bufferSize = bufferSize;
+            
             this.base = ((long) (0xFFFF_FFFFL & node)) * ((long) bufferSize);
             this.count = bytes.readShort(base) & 0x7FFF;
             this.leaf = 0 != (bytes.readShort(base) & 0x8000);
@@ -55,36 +56,40 @@ public class Node {
             this.pos = base + COUNT_SIZE;
         }
 
-        public Immutable childNode() {
-            return new Immutable(bytes, child(), bufferSize);
+        public int node() {
+            return node;
         }
 
-        public Immutable rightChildNode() {
+        public Immutable<K,V> childNode() {
+            return new Immutable<>(bytes, keyRecord, valueRecord, child(), bufferSize);
+        }
+
+        public Immutable<K,V> rightChildNode() {
             if(index == count) {
                 return null;
             }
             else {
-                return new Immutable(bytes, rightChild(), bufferSize);
+                return new Immutable<>(bytes, keyRecord, valueRecord, rightChild(), bufferSize);
             }
         }
 
-        public Immutable leftChildNode() {
-            return new Immutable(bytes, leftChild(), bufferSize);
+        public Immutable<K,V> leftChildNode() {
+            return new Immutable<>(bytes, keyRecord, valueRecord, leftChild(), bufferSize);
         }
 
-        public Immutable index(final int index) {
+        public Immutable<K,V> index(final int index) {
             this.index = index;
             this.pos = base + COUNT_SIZE + (index * entrySize());
             return this;
         }
 
-        public Immutable incrementIndex() {
+        public Immutable<K,V> incrementIndex() {
             index += 1;
             pos += entrySize();
             return this;
         }
 
-        public Immutable decrementIndex() {
+        public Immutable<K,V> decrementIndex() {
             index -= 1;
             pos -= entrySize();
             return this;
@@ -118,7 +123,7 @@ public class Node {
             return pos + CHILD_SIZE;
         }
 
-        public long key() {
+        public K key() {
             return keyRecord.extract(bytes, keyPos());
         }
 
@@ -126,11 +131,11 @@ public class Node {
             return keyPos() + keyRecord.size();
         }
 
-        public long value() {
+        public V value() {
             return valueRecord.extract(bytes, valuePos());
         }
 
-        public boolean find(final long k) {
+        public boolean find(final K k) {
             for(; index < count && keyRecord.compare(bytes, keyPos(), k) > 0; ++index) {
                 pos += entrySize();
             }
@@ -138,8 +143,8 @@ public class Node {
             return (index < count) && (keyRecord.compare(bytes, keyPos(), k) == 0);
         }
 
-        public List<Long> keys() {
-            final List<Long> ret = new ArrayList<>();
+        public List<K> keys() {
+            final List<K> ret = new ArrayList<>();
             index(0);
             while(index < count) {
                 ret.add(key());
@@ -149,8 +154,8 @@ public class Node {
             return ret;
         }
 
-        public List<Long> values() {
-            final List<Long> ret = new ArrayList<>();
+        public List<V> values() {
+            final List<V> ret = new ArrayList<>();
             index(0);
             while(index < count) {
                 ret.add(value());
@@ -169,19 +174,23 @@ public class Node {
         }
     }
 
-    public static class Mutable extends Immutable<MutableBytes> {
-        Mutable(final MutableBytes bytes, final int node, final int bufferSize) {
-            super(bytes, node, bufferSize);
+    public static class Mutable<K,V> extends Immutable<K,V> {
+        protected final MutableBytes bytes;
+        
+        public Mutable(final MutableBytes bytes, final Record<K> keyRecord, final Record<V> valueRecord,
+                       final int node, final int bufferSize) {
+            super(bytes, keyRecord, valueRecord, node, bufferSize);
+            this.bytes = bytes;
         }
 
         @Override
-        public Mutable childNode() {
-            return new Mutable(bytes, child(), bufferSize);
+        public Mutable<K,V> childNode() {
+            return new Mutable<>(bytes, keyRecord, valueRecord, child(), bufferSize);
         }
 
         @Override
-        public Mutable leftChildNode(){
-            return new Mutable(bytes, leftChild(), bufferSize);
+        public Mutable<K,V> leftChildNode(){
+            return new Mutable<>(bytes, keyRecord, valueRecord, leftChild(), bufferSize);
         }
 
         @Override
@@ -189,26 +198,26 @@ public class Node {
             return bytes;
         }
 
-        public Mutable leftSiblingNode() {
+        public Mutable<K,V> leftSiblingNode() {
             if(index == 0) {
                 return null;
             }
             else {
-                return new Mutable(bytes, bytes.readInt(pos - entrySize()), bufferSize);
+                return new Mutable<>(bytes, keyRecord, valueRecord, bytes.readInt(pos - entrySize()), bufferSize);
             }
         }
 
         @Override
-        public Mutable rightChildNode() {
+        public Mutable<K,V> rightChildNode() {
             if(index == count()) {
                 return null;
             }
             else {
-                return new Mutable(bytes, rightChild(), bufferSize);
+                return new Mutable<>(bytes, keyRecord, valueRecord, rightChild(), bufferSize);
             }
         }
 
-        public Mutable leaf(final boolean val) {
+        public Mutable<K,V> leaf(final boolean val) {
             final short now = bytes.readShort(base);
             if(val) {
                 bytes.writeShort(base, (short) (now | 0x8000));
@@ -221,44 +230,44 @@ public class Node {
             return this;
         }
 
-        public Mutable count(final int val) {
+        public Mutable<K,V> count(final int val) {
             final short toWrite = (short) ((bytes.readShort(base) & 0x8000) | val);
             bytes.writeShort(base, toWrite);
             this.count = val;
             return this;
         }
 
-        public Mutable incrementCount() {
+        public Mutable<K,V> incrementCount() {
             return count(count + 1);
         }
 
-        public Mutable decrementCount() {
+        public Mutable<K,V> decrementCount() {
             return count(count - 1);
         }
 
-        public Mutable child(final int val) {
+        public Mutable<K,V> child(final int val) {
             bytes.writeInt(pos, val);
             return this;
         }
 
-        public Mutable leftChild(final int val) {
+        public Mutable<K,V> leftChild(final int val) {
             return child(val);
         }
         
-        public Mutable rightChild(final int val) {
+        public Mutable<K,V> rightChild(final int val) {
             bytes.writeInt(pos + entrySize(), val);
             return this;
         }
 
-        public Mutable child(final Immutable node) {
+        public Mutable<K,V> child(final Immutable<K,V> node) {
             return child(node.node);
         }
 
-        public Mutable leftChild(final Immutable node) {
+        public Mutable<K,V> leftChild(final Immutable<K,V> node) {
             return leftChild(node.node);
         }
 
-        public Mutable rightChild(final Immutable node){
+        public Mutable<K,V> rightChild(final Immutable<K,V> node){
             return rightChild(node.node);
         }
 
@@ -266,23 +275,23 @@ public class Node {
             return (entrySize() * (count - index)) + CHILD_SIZE;
         }
 
-        public Mutable rightShift() {
+        public Mutable<K,V> rightShift() {
             bytes.copy(pos + entrySize(), bytes, pos, shiftLength());
             return this;
         }
 
-        public Mutable leftShift() {
+        public Mutable<K,V> leftShift() {
             bytes.copy(pos - entrySize(), bytes, pos, shiftLength());
             return this;
         }
 
-        public Mutable key(final long k) {
-            bytes.writeLong(pos + CHILD_SIZE, k);
+        public Mutable<K,V> key(final K k) {
+            keyRecord.place(bytes, keyPos(), k);
             return this;
         }
 
-        public Mutable value(final long v) {
-            bytes.writeLong(pos + CHILD_SIZE + keyRecord.size(), v);
+        public Mutable<K,V> value(final V v) {
+            valueRecord.place(bytes, valuePos(), v);
             return this;
         }
     }

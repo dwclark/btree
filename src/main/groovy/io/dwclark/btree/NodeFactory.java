@@ -8,8 +8,14 @@ interface NodeFactory<K,V> {
     Record<V> valueRecord();
     int getBufferSize();
     int getMinDegree();
-    Node.Mutable mutable(MutableBytes bytes, int node);
-    Node.Immutable immutable(ImmutableBytes bytes, int node);
+
+    default Node.Mutable<K,V> mutable(final MutableBytes bytes, final int node) {
+        return new Node.Mutable(bytes, keyRecord(), valueRecord(), node, getBufferSize());
+    }
+    
+    default Node.Immutable<K,V> immutable(final ImmutableBytes bytes, final int node) {
+        return new Node.Immutable(bytes, keyRecord(), valueRecord(), node, getBufferSize());
+    }
 
     public static <K,V> int bufferSizeForMinDegree(final int t, final Record<K> keyRecord, final Record<V> valueRecord) {
         return (((2 * t) - 1) * Node.entrySize(keyRecord, valueRecord)) + Node.META_SIZE;

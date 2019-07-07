@@ -1,50 +1,56 @@
 package io.dwclark.btree
 
 import spock.lang.*
-import static StandardBTree.*
 import io.dwclark.btree.io.GrowableBuffers
 import io.dwclark.btree.io.FixedBuffer
 
-class StandardBTreeSpec extends Specification {
+class BTreeSpec extends Specification {
 
-
+    static final lr = LongRecord.instance()
+    
     def "test buffer size for min degree"() {
+        setup:
+        def for2 = NodeFactory.bufferSizeForMinDegree(2, lr, lr)
+        def for3 = NodeFactory.bufferSizeForMinDegree(3, lr, lr)
+        
         expect:
-        bufferSizeForMinDegree(2) == 66
-        bufferSizeForMinDegree(3) == 106
-        findMinDegree(bufferSizeForMinDegree(2)) == 2
-        findMinDegree(bufferSizeForMinDegree(3)) == 3
-        findMinDegree(4096) == 102
+        for2 == 66
+        for3 == 106
+        new LongLongFactory(for2).minDegree == 2
+        new LongLongFactory(for3).minDegree == 3
+        new LongLongFactory(4096).minDegree == 102
     }
     
     def "test bad buffer size"() {
         when:
-        findMinDegree(65)
-
+        new LongLongFactory(65)
+        
         then:
         thrown IllegalArgumentException
     }
 
     def "test basic constructor"() {
         setup:
-        def bufferSize = 4_096;
-        def view = new GrowableBuffers(bufferSize, false);
-        def btree = new StandardBTree(bufferSize, view);
-
+        def bufferSize = 4_096
+        def factory = new LongLongFactory(4_096)
+        def fb = new FixedBuffer(bufferSize, false)
+        def btree = new BTree(fb, factory)
+        
         expect:
-        btree.minDegree == 102
-        btree.minKeys == 101
-        btree.minChildren == 102
-        btree.maxKeys == 203
-        btree.maxChildren == 204
+        factory.minDegree == 102
+        factory.minKeys == 101
+        factory.minChildren == 102
+        factory.maxKeys == 203
+        factory.maxChildren == 204
         btree.root == 0
     }
 
     def "test leaf/count b-tree manipulation methods"() {
         setup:
         def bufferSize = 4_096
+        def factory = new LongLongFactory(bufferSize)
         def fb = new FixedBuffer(bufferSize, false)
-        def btree = new StandardBTree(bufferSize, fb);
+        def btree = new BTree(fb, factory);
         
         when:
         def node = btree.mutableRoot()
@@ -66,9 +72,10 @@ class StandardBTreeSpec extends Specification {
         setup:
         def bufferSize = 4_096
         def fb = new FixedBuffer(bufferSize, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory)
         def node = btree.mutableRoot()
-        (0..<13).each { key ->
+        (0L..<13L).each { key ->
             node.key(key).value(key *2L).incrementCount().incrementIndex();
         }
 
@@ -77,7 +84,7 @@ class StandardBTreeSpec extends Specification {
         
         then:
         node.count() == 13
-        (0..<13).every { index ->
+        (0L..<13L).every { index ->
             node.key() == (long) index && node.value() == (2L * index)
             node.incrementIndex()
         }
@@ -87,7 +94,8 @@ class StandardBTreeSpec extends Specification {
         setup:
         def bufferSize = 4_096
         def fb = new FixedBuffer(bufferSize, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory)
         def node = btree.mutableRoot()
         
         when:
@@ -105,11 +113,12 @@ class StandardBTreeSpec extends Specification {
         setup:
         def bufferSize = 4_096
         def fb = new FixedBuffer(bufferSize, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize);
+        def btree = new BTree(fb, factory)
         def node = btree.mutableRoot()
         
         (0..<13).each { idx ->
-            node.key(idx).value(idx * 2L).child(idx * 3).incrementCount().incrementIndex()
+            node.key((long) idx).value(idx * 2L).child(idx * 3).incrementCount().incrementIndex()
         }
         
         node.child(13 * 3)
@@ -140,8 +149,9 @@ class StandardBTreeSpec extends Specification {
     def 'test insert and search single'() {
         setup:
         def bufferSize = 1024;
-        def fb = new FixedBuffer(bufferSize, false);
-        def btree = new StandardBTree(bufferSize, fb);
+        def fb = new FixedBuffer(bufferSize, false)
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory);
 
         when:
         btree.insert 1L, 2L
@@ -152,9 +162,10 @@ class StandardBTreeSpec extends Specification {
 
     def 'test 2-3-4 tree'() {
         setup:
-        def bufferSize = StandardBTree.bufferSizeForMinDegree(2)
+        def bufferSize = NodeFactory.bufferSizeForMinDegree(2, lr, lr)
         def fb = new FixedBuffer(4_096, false);
-        def btree = new StandardBTree(bufferSize, fb);
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory);
 
         when:
         (1L..20L).each { btree.insert(it, it * 2L) }
@@ -176,9 +187,10 @@ class StandardBTreeSpec extends Specification {
 
     def 'test book insert example'() {
         setup:
-        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def bufferSize = NodeFactory.bufferSizeForMinDegree(3, lr, lr)
         def fb = new FixedBuffer(4_096, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory)
         def root = btree.mutableRoot().leaf(false)
         [ 'g', 'm', 'p', 'x' ].each { s ->
             root.key((s as char) as long).value((s as char) as long).incrementCount().incrementIndex()
@@ -257,24 +269,27 @@ class StandardBTreeSpec extends Specification {
         setup:
         def bufferSize = 4_096
         def fb = new FixedBuffer(bufferSize, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize);
+        def btree = new BTree(fb, factory)
+
         (1L..10L).each { btree.insert it, it }
         def toRemove = (1L..10L).toList()
         Collections.shuffle(toRemove)
 
         expect:
         toRemove.every { lng ->
-            def found = btree.search(lng) != -1L;
+            def found = btree.search(lng) != null;
             btree.remove(lng);
-            found && btree.search(lng) == -1L
+            found && btree.search(lng) == null
         }
     }
-
+    
     def 'test book remove example'() {
         setup:
-        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def bufferSize = NodeFactory.bufferSizeForMinDegree(3, lr, lr)
         def fb = new FixedBuffer(4_096, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory)
         def root = btree.mutableRoot().leaf(false)
         def w = fb.forWrite()
        
@@ -375,9 +390,10 @@ class StandardBTreeSpec extends Specification {
 
     def 'test basic to string'() {
         setup:
-        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def bufferSize = NodeFactory.bufferSizeForMinDegree(2, lr, lr)
         def fb = new FixedBuffer(4_096, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory)
         btree.insert(1L, 2L)
         btree.insert(3L, 4L)
         btree.insert(5L, 6L)
@@ -391,9 +407,10 @@ class StandardBTreeSpec extends Specification {
 
     def 'test remove missing'() {
         setup:
-        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def bufferSize = NodeFactory.bufferSizeForMinDegree(3, lr, lr)
         def fb = new FixedBuffer(4_096, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory)
         btree.insert(1L, 2L)
         btree.insert(3L, 4L)
         btree.insert(5L, 6L)
@@ -406,9 +423,10 @@ class StandardBTreeSpec extends Specification {
 
     def 'test update'() {
         setup:
-        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def bufferSize = NodeFactory.bufferSizeForMinDegree(3, lr, lr)
         def fb = new FixedBuffer(4_096, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def factory = new LongLongFactory(bufferSize)
+        def btree = new BTree(fb, factory)
         btree.insert(1L, 2L)
         btree.insert(3L, 4L)
         btree.insert(5L, 6L)
@@ -423,9 +441,9 @@ class StandardBTreeSpec extends Specification {
 
     def 'misc inner node remove (missing from book example)'() {
         setup:
-        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def bufferSize = NodeFactory.bufferSizeForMinDegree(3, lr, lr)
         def fb = new FixedBuffer(4_096, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def btree = new BTree(fb, new LongLongFactory(bufferSize))
         def root = btree.mutableRoot().leaf(false)
         def w = fb.forWrite()
        
@@ -475,9 +493,9 @@ class StandardBTreeSpec extends Specification {
 
     def 'misc inner node remove 2 (missing from book example)'() {
         setup:
-        def bufferSize = StandardBTree.bufferSizeForMinDegree(3)
+        def bufferSize = NodeFactory.bufferSizeForMinDegree(3, lr, lr)
         def fb = new FixedBuffer(4_096, false)
-        def btree = new StandardBTree(bufferSize, fb)
+        def btree = new BTree(fb, new LongLongFactory(bufferSize))
         def root = btree.mutableRoot().leaf(false)
         def w = fb.forWrite()
        
@@ -522,6 +540,5 @@ class StandardBTreeSpec extends Specification {
 
         then:
         toStrs(btree.breadthFirst()) == [ 'k', 'abch', 'lm' ]
-
     }
 }

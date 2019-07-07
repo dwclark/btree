@@ -17,12 +17,4 @@ public class LongLongFactory implements NodeFactory<Long,Long> {
     public final LongRecord valueRecord() { return LongRecord.instance(); }
     public final int getBufferSize() { return bufferSize; }
     public final int getMinDegree() { return minDegree; }
-    
-    public Node.Mutable mutable(final MutableBytes bytes, final int node) {
-        return new Node.Mutable(bytes, node, bufferSize);
-    }
-    
-    public Node.Immutable immutable(final ImmutableBytes bytes, final int node) {
-        return new Node.Immutable(bytes, node, bufferSize);
-    }
 }
