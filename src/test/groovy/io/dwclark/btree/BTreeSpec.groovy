@@ -541,4 +541,24 @@ class BTreeSpec extends Specification {
         then:
         toStrs(btree.breadthFirst()) == [ 'k', 'abch', 'lm' ]
     }
+
+    def 'test uuid/int btree'() {
+        setup:
+        def bufferSize = 4_096
+        def factory = new StandardFactory(UUIDRecord.instance(), IntegerRecord.instance(), bufferSize);
+        def fb = new GrowableBuffers(bufferSize, false)
+        def btree = new BTree(fb, factory)
+
+        def toAdd = (0..<100).inject([:]) { map, i -> map << [(UUID.randomUUID()): i] };
+        toAdd.each { uuid, i -> btree.insert uuid, i };
+        
+        expect:
+        toAdd.size() == 100
+        toAdd.every { uuid, i -> btree.search(uuid) == i }
+        btree.search(UUID.randomUUID()) == null
+        toAdd.each { uuid, i ->
+            println("${i}: ${uuid}")
+            assert(btree.remove(uuid))
+        }
+    }
 }
