@@ -137,6 +137,22 @@ class BulkBytes {
 
     public static void copy(final MutableBytes target, final long targetAt,
                             final ImmutableBytes src, final long srcAt, final int length) {
+
+        if(src != target) {
+            copyRight(target, targetAt, src, srcAt, length);
+        }
+        else if(src == target) {
+            if(targetAt > srcAt) {
+                copyRight(target, targetAt, src, srcAt, length);
+            }
+            else if(targetAt < srcAt) {
+                copyLeft(target, targetAt, src, srcAt, length);
+            }
+        }
+    }
+
+    private static void copyRight(final MutableBytes target, final long targetAt,
+                                  final ImmutableBytes src, final long srcAt, final int length) {
         int copied = 0;
         int left = length;
         final byte[] buffer = _tlAry.get();
@@ -144,6 +160,22 @@ class BulkBytes {
             final int toRead = Math.min(SIZE, left);
             final long copyStart = srcAt + (length - copied) - toRead;
             final long targetStart = targetAt + (length - copied) - toRead;
+            src.read(copyStart, buffer, 0, toRead);
+            target.write(targetStart, buffer, 0, toRead);
+            copied += toRead;
+            left -= toRead;
+        }
+    }
+
+    private static void copyLeft(final MutableBytes target, final long targetAt,
+                                 final ImmutableBytes src, final long srcAt, final int length) {
+        int copied = 0;
+        int left = length;
+        final byte[] buffer = _tlAry.get();
+        while(left > 0) {
+            final int toRead = Math.min(SIZE, left);
+            final long copyStart = srcAt + copied;
+            final long targetStart = targetAt + copied;
             src.read(copyStart, buffer, 0, toRead);
             target.write(targetStart, buffer, 0, toRead);
             copied += toRead;

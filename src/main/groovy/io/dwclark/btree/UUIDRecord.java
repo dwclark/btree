@@ -41,4 +41,20 @@ public class UUIDRecord implements Record<UUID> {
 
         return 0;
     }
+
+    public int compareInPlace(final ImmutableBytes bytes, final long pos1, final long pos2) {
+        long _1 = bytes.readLong(pos1);
+        long _2 = bytes.readLong(pos2);
+
+        if(_1 < _2) return -1;
+        if(_1 > _2) return 1;
+
+        _1 = bytes.readLong(pos1 + 8);
+        _2 = bytes.readLong(pos2 + 8);
+
+        if(_1 < _2) return -1;
+        if(_1 > _2) return 1;
+
+        return 0;
+    }
 }

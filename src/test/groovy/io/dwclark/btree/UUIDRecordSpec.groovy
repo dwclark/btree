@@ -40,5 +40,6 @@ class UUIDRecordSpec extends Specification {
         expect:
         (u1 <=> u2) ==  -1
         record.compare(bytes, 0L, u1) == -1
+        (u2 <=> u1) == 1
     }
 }

@@ -10,8 +10,15 @@ import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.Map.Entry;
+import java.util.AbstractMap.SimpleImmutableEntry;
+import java.util.Arrays;
 
 public class BTree<K,V> {
+
+    interface BreadthFirst<K,V> {
+        void take(Node.Immutable<K,V> node, K predecessor, K successor);
+    }
 
     private final ViewBytes viewBytes;
     private final BlockAllocator allocator;
@@ -163,23 +170,47 @@ public class BTree<K,V> {
         }
     }
 
+    private Node.Mutable<K,V> maximumNode(final Node.Mutable<K,V> node) {
+        if(node.leaf()) {
+            return node;
+        }
+        else {
+            node.index(node.count());
+            return maximumNode(node.childNode());
+        }
+    }
+
+    private Node.Mutable<K,V> minimumNode(final Node.Mutable<K,V> node) {
+        if(node.leaf()) {
+            return node;
+        }
+        else {
+            node.index(0);
+            return minimumNode(node.childNode());
+        }
+    }
+
     private void removeInnerNode(final Node.Mutable<K,V> node, final K key) {
         final int minDegree = factory.getMinDegree();
         final Node.Mutable<K,V> left = node.leftChildNode();
         final Node.Mutable<K,V> right = node.rightChildNode();
 
         if(left.count() >= minDegree) {
-            left.index(left.count() - 1);
-            final K predecessorKey = left.key();
-            final V predecessorValue = left.value();
+            final Node.Mutable<K,V> pred = maximumNode(left);
+            pred.index(pred.count() - 1);
+            final K predecessorKey = pred.key();
+            final V predecessorValue = pred.value();
+            left.index(0);
             remove(left, predecessorKey);
             node.key(predecessorKey);
             node.value(predecessorValue);
         }
         else if(right.count() >= minDegree) {
+            final Node.Mutable<K,V> succ = minimumNode(right);
+            succ.index(0);
+            final K successorKey = succ.key();
+            final V successorValue = succ.value();
             right.index(0);
-            final K successorKey = right.key();
-            final V successorValue = right.value();
             remove(right, successorKey);
             node.key(successorKey);
             node.value(successorValue);
@@ -197,27 +228,38 @@ public class BTree<K,V> {
         final Node.Mutable<K,V> leftSibling = parent.leftSiblingNode();
         final Node.Mutable<K,V> rightSibling = parent.rightChildNode();
         if(leftSibling != null && leftSibling.count() > minKeys) {
-            leftSibling.index(leftSibling.count() - 1);
-            final K leftKey = leftSibling.key();
-            final V leftValue = leftSibling.value();
-            leftSibling.incrementIndex();
-            leftSibling.leftShift().decrementCount();
-
+            final int originalIndex = parent.index();
             parent.decrementIndex();
-            child.rightShift().key(parent.key()).value(parent.value()).incrementCount();
-            parent.key(leftKey).value(leftValue);
-            parent.incrementIndex();
+            child.index(0);
+            child.rightShift();
+            child.key(parent.key());
+            child.value(parent.value());
+            leftSibling.index(leftSibling.count());
+            child.child(leftSibling.child());
+            child.incrementCount();
+
+            leftSibling.index(leftSibling.count() - 1);
+            parent.key(leftSibling.key());
+            parent.value(leftSibling.value());
+            
+            leftSibling.decrementCount();
+            parent.index(originalIndex);
         }
         else if(rightSibling != null && rightSibling.count() > minKeys) {
-            final K rightKey = rightSibling.key();
-            final V rightValue = rightSibling.value();
-            rightSibling.incrementIndex();
-            rightSibling.leftShift().decrementCount();
-
             child.index(child.count());
-            child.rightShift().key(parent.key()).value(parent.value()).incrementCount();
+            child.rightShift();
+            child.key(parent.key());
+            child.value(parent.value());
+            child.incrementIndex();
+            child.child(rightSibling.child());
+            child.incrementCount();
 
-            parent.key(rightKey).value(rightValue);
+            parent.key(rightSibling.key());
+            parent.value(rightSibling.value());
+
+            rightSibling.incrementIndex();
+            rightSibling.leftShift();
+            rightSibling.decrementCount();
         }
         else if(leftSibling != null) {
             parent.decrementIndex();
@@ -267,56 +309,100 @@ public class BTree<K,V> {
         return viewBytes.withWrite(func).booleanValue();
     }
 
-    private void toString(final StringBuilder sb, final Node.Immutable<K,V> node) {
-        sb.append("Node: ").append(node.node()).append(" ");
-        while(node.index() < node.count()) {
-            sb.append("{");
-            if(!node.leaf()) {
-                sb.append(node.child()).append(",");
-            }
-            
-            sb.append(node.key()).append(",");
-            sb.append(node.value()).append("} ");
-            node.incrementIndex();
-        }
-
-        if(!node.leaf()) {
-            sb.append("{").append(node.child()).append("}; ");
-
-            node.index(0);
-            while(node.index() <= node.count()) {
-                toString(sb, node.childNode());
-                node.incrementIndex();
-            }
-        }
-    }
-
     public String toString() {
         final StringBuilder sb = new StringBuilder();
-        viewBytes.withRead((bytes) -> { toString(sb, factory.immutable(bytes, root)); });
+
+        final BreadthFirst<K,V> bf = (node, pred, succ) -> {
+            sb.append("Node: ").append(node.node()).append(" ").append(node.toString()).append("; ");
+        };
+        
+        breadthFirst(bf);
         return sb.toString();
     }
-
-    private List<Node.Immutable<K,V>> _breadthFirst(final ImmutableBytes bytes) {
-        final List<Node.Immutable<K,V>> ret = new ArrayList<>();
-        final Queue<Integer> traversal = new LinkedList<>();
-        traversal.offer(root);
-        while(!traversal.isEmpty()) {
-            final Node.Immutable<K,V> node = factory.immutable(bytes, traversal.poll());
-            ret.add(node);
+    
+    private class BreadthEntry {
+        Node.Immutable<K,V> node;
+        K predecessor;
+        K successor;
+        
+        public BreadthEntry(final Node.Immutable<K,V> node, final K predecessor, final K successor) {
+            this.node = node;
+            this.predecessor = predecessor;
+            this.successor = successor;
+        }
+    }
+    
+    private void _breadthFirst(final ImmutableBytes bytes, final BreadthFirst<K,V> handler) {
+        final Queue<BreadthEntry> queue = new LinkedList<>();
+        queue.offer(new BreadthEntry(immutableRoot(), null, null));
+        while(!queue.isEmpty()) {
+            final BreadthEntry entry = queue.poll();
+            final Node.Immutable<K,V> node = entry.node;
+            handler.take(node, entry.predecessor, entry.successor);
             if(!node.leaf()) {
-                while(node.index() <= node.count()) {
-                    traversal.offer(node.leftChild());
-                    node.incrementIndex();
+                for(int i = 0; i <= node.count(); ++i) {
+                    node.index(i);
+                    final Node.Immutable<K,V> next = factory.immutable(bytes, node.child());
+                    final K succ = (node.index() == node.count()) ? entry.successor : node.key();
+                    final K pred = (node.index() == 0) ? entry.predecessor : node.decrementIndex().key();
+                    queue.offer(new BreadthEntry(next, pred, succ));
                 }
             }
         }
+    }
 
-        return ret;
+    public void breadthFirst(final BreadthFirst<K,V> func) {
+        viewBytes.withRead((bytes) -> { _breadthFirst(bytes, func); });
     }
     
-    public List<Node.Immutable<K,V>> breadthFirst() {
-        return viewBytes.withRead(this::_breadthFirst);
+    public List<Node.Immutable<K,V>> breadthFirstNodes() {
+        final List<Node.Immutable<K,V>> ret = new ArrayList<>();
+        breadthFirst((node, pred, succ) -> { ret.add(node); });
+        return ret;
+    }
+
+    public boolean isValid() {
+        final boolean[] ary = new boolean[1];
+        ary[0] = true;
+        
+        final BreadthFirst<K,V> bf = (node, pred, succ) -> {
+            if(!node.isSorted()) {
+                ary[0] = false;
+            }
+            
+            if(pred != null && node.compareKeyAt(pred, 0) > 0) {
+                ary[0] = false;
+            }
+
+            if(succ != null && node.compareKeyAt(succ, node.count() - 1) < 0) {
+                ary[0] = false;
+            }
+
+            if(node.count() > factory.getMaxKeys()) {
+                ary[0] = false;
+            }
+            
+            if(succ != null || pred != null) {
+                if(node.count() < factory.getMinKeys()) {
+                    ary[0] = false;
+                }
+            }
+        };
+
+        breadthFirst(bf);
+        return ary[0];
+    }
+
+    public long size() {
+        final long[] ary = new long[1];
+        breadthFirst((node, pred, succ) -> { ary[0] = ary[0] + node.count(); });
+        return ary[0];
+    }
+
+    public List<K> keys() {
+        final List<K> ret = new ArrayList<>();
+        breadthFirst((node, pred, succ) -> { ret.addAll(node.keys()); });
+        return ret;
     }
 
     protected Node.Mutable<K,V> mutableRoot() {

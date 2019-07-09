@@ -30,16 +30,30 @@ public class Node {
             return Node.entrySize(keyRecord, valueRecord);
         }
 
-        protected ImmutableBytes bytes;
-        protected Record<K> keyRecord;
-        protected Record<V> valueRecord;
+        public final Record<K> keyRecord;
+        public final Record<V> valueRecord;
+        final protected ImmutableBytes bytes;
+        final protected long base;
+        final protected int bufferSize;
+        final protected int node;
+
         protected long pos;
-        protected long base;
-        protected int bufferSize;
-        protected int node;
         protected int index;
         protected int count;
         protected boolean leaf;
+
+        public Immutable(final Immutable rhs) {
+            this.bytes = rhs.bytes;
+            this.keyRecord = rhs.keyRecord;
+            this.valueRecord = rhs.valueRecord;
+            this.base = rhs.base;
+            this.bufferSize = rhs.bufferSize;
+            this.node = rhs.node;
+            this.pos = rhs.pos;
+            this.index = rhs.index;
+            this.count = rhs.count;
+            this.leaf = rhs.leaf;
+        }
         
         public Immutable(final ImmutableBytes bytes, final Record<K> keyRecord, final Record<V> valueRecord,
                          final int node, final int bufferSize) {
@@ -54,6 +68,10 @@ public class Node {
             this.leaf = 0 != (bytes.readShort(base) & 0x8000);
             this.index = 0;
             this.pos = base + COUNT_SIZE;
+        }
+
+        public Immutable copy() {
+            return new Immutable(this);
         }
 
         public int node() {
@@ -111,6 +129,11 @@ public class Node {
             return bytes.readInt(pos);
         }
 
+        public int childAtIndex(final int idx) {
+            final long pos = COUNT_SIZE + (idx * entrySize());
+            return bytes.readInt(pos);
+        }
+
         public int leftChild() {
             return child();
         }
@@ -127,12 +150,32 @@ public class Node {
             return keyRecord.extract(bytes, keyPos());
         }
 
+        public long keyPos(final int idx) {
+            return base + COUNT_SIZE + CHILD_SIZE + (idx * entrySize());
+        }
+        
+        public K keyAtIndex(final int idx) {
+            return keyRecord.extract(bytes, keyPos(idx));
+        }
+
         public long valuePos() {
             return keyPos() + keyRecord.size();
         }
 
         public V value() {
             return valueRecord.extract(bytes, valuePos());
+        }
+
+        public long valuePos(final int idx) {
+            return base + COUNT_SIZE + CHILD_SIZE + keySize() + (idx * entrySize());
+        }
+
+        public V valueAtIndex(final int idx) {
+            return valueRecord.extract(bytes, valuePos(idx));
+        }
+
+        public int compareKeyAt(final K k, final int idx) {
+            return keyRecord.compare(bytes, keyPos(idx), k);
         }
 
         public boolean find(final K k) {
@@ -143,26 +186,48 @@ public class Node {
             return (index < count) && (keyRecord.compare(bytes, keyPos(), k) == 0);
         }
 
-        public List<K> keys() {
+        private boolean _isSorted() {
+            for(index(0); index < (count - 1); incrementIndex()) {
+                final long firstPos = pos() + CHILD_SIZE;
+                final long secondPos = firstPos + entrySize();
+                if(keyRecord.compareInPlace(bytes, firstPos, secondPos) > 0) {
+                    final K first = key();
+                    final K second = incrementIndex().key();
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        
+        public boolean isSorted() {
+            return copy()._isSorted();
+        }
+
+        private List<K> _keys() {
             final List<K> ret = new ArrayList<>();
-            index(0);
-            while(index < count) {
+            for(index(0); index < count; incrementIndex()) {
                 ret.add(key());
-                incrementIndex();
+            }
+            
+            return ret;
+        }
+        
+        public List<K> keys() {
+            return copy()._keys();
+        }
+
+        private List<V> _values() {
+            final List<V> ret = new ArrayList<>();
+            for(index(0); index < count; incrementIndex()) {
+                ret.add(value());
             }
 
             return ret;
         }
-
+        
         public List<V> values() {
-            final List<V> ret = new ArrayList<>();
-            index(0);
-            while(index < count) {
-                ret.add(value());
-                incrementIndex();
-            }
-
-            return ret;
+            return copy()._values();
         }
 
         public long pos() {
@@ -172,15 +237,50 @@ public class Node {
         public ImmutableBytes bytes() {
             return bytes;
         }
+
+        private String _toString() {
+            final StringBuilder sb = new StringBuilder();
+            
+            for(index(0); index < count(); incrementIndex()) {
+                sb.append("{");
+                if(!leaf()) {
+                    sb.append(child()).append(",");
+                }
+                
+                sb.append(key()).append(",");
+                sb.append(value()).append("}");
+            }
+            
+            if(!leaf()) {
+                sb.append(" {").append(child()).append("}");
+            }
+            
+            return sb.toString();
+        }
+
+        @Override
+        public String toString() {
+            return copy()._toString();
+        }
     }
 
     public static class Mutable<K,V> extends Immutable<K,V> {
         protected final MutableBytes bytes;
+
+        public Mutable(final Mutable rhs) {
+            super(rhs);
+            this.bytes = rhs.bytes;
+        }
         
         public Mutable(final MutableBytes bytes, final Record<K> keyRecord, final Record<V> valueRecord,
                        final int node, final int bufferSize) {
             super(bytes, keyRecord, valueRecord, node, bufferSize);
             this.bytes = bytes;
+        }
+
+        @Override
+        public Mutable copy() {
+            return new Mutable(this);
         }
 
         @Override

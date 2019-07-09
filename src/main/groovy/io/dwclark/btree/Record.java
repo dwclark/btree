@@ -8,4 +8,5 @@ interface Record<T> {
     T extract(ImmutableBytes bytes, long pos);
     void place(MutableBytes bytes, long pos, T val);
     int compare(ImmutableBytes bytes, long pos, T val);
+    int compareInPlace(ImmutableBytes bytes, long pos1, long pos2);
 }

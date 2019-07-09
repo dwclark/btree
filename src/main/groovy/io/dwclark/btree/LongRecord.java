@@ -26,4 +26,8 @@ public class LongRecord implements Record<Long> {
     public int compare(final ImmutableBytes bytes, final long pos, final Long lhs) {
         return Long.compare(lhs.longValue(), bytes.readLong(pos));
     }
+    
+    public int compareInPlace(final ImmutableBytes bytes, final long pos1, final long pos2) {
+        return Long.compare(bytes.readLong(pos1), bytes.readLong(pos2));
+    }
 }

@@ -26,4 +26,8 @@ public class IntegerRecord implements Record<Integer> {
     public int compare(final ImmutableBytes bytes, final long pos, final Integer lhs) {
         return Integer.compare(lhs.intValue(), bytes.readInt(pos));
     }
+
+    public int compareInPlace(final ImmutableBytes bytes, final long pos1, final long pos2) {
+        return Integer.compare(bytes.readInt(pos1), bytes.readInt(pos2));
+    }
 }

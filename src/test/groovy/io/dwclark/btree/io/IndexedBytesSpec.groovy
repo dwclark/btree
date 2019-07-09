@@ -228,20 +228,34 @@ class IndexedBytesSpec extends Specification {
         }
     }
 
-    def 'test overlapping copy'() {
+    def 'test overlapping copy right'() {
         setup:
-        def fb = new FixedBuffer(128, false)
+        def size = 2_048
+        def fb = new FixedBuffer(2048, false)
         def fw = fb.forWrite()
-        for(int i = 0; i < 128; ++i) {
-            fw.write((long) i, (byte) i)
+        for(int i = 0; i < 64; ++i) {
+            fw.writeInt(i *32L, i)
         }
 
-        fw.copy(32L, fw, 0, 64);
+        fw.copy(256L, fw, 0L, 1536);
 
-        expect:
-        (0..<32).every { i -> fw.read(i) == i; }
-        (32..<(32+64)).every { i ->fw.read(i) == (i-32); }
-        (96..<128).every {i -> fw.read(i) == i; }
-        
+        (0..<8).each { i -> assert(fw.readInt(i*32L) == i) }
+        (8..<56).each { i -> assert(fw.readInt(i*32L) == (i-8)) }
+        (56..<64).each { i -> assert(fw.readInt(i*32L) == i) }
+    }
+
+    def 'test overlapping copy left'() {
+        setup:
+        def size = 2_048
+        def fb = new FixedBuffer(2048, false)
+        def fw = fb.forWrite()
+        for(int i = 0; i < 64; ++i) {
+            fw.writeInt(i *32L, i)
+        }
+
+        fw.copy(0L, fw, 256L, 1536);
+
+        (0..<48).each { i -> assert(fw.readInt(i*32L) == (i + 8)) }
+        (48..<64).each { i -> assert(fw.readInt(i*32L) == i) }
     }
 }
