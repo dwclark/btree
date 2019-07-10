@@ -286,7 +286,7 @@ public class ChannelBuffers {
         lock.lock();
         
         final Key key = Key.make(id, -1L);
-        return new VectorIndexed.Mutable(new ForRead(key)) {
+        return new VectorIndexed.Immutable(new ForRead(key)) {
             public void stop() {
                 lock.unlock();
             }

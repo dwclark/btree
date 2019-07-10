@@ -589,6 +589,35 @@ class BTreeSpec extends Specification {
 
     }
 
+    def 'test lots of int/int operations'() {
+        setup:
+        def ir = IntegerRecord.instance()
+        def total = 100_000
+        def random = new Random()
+        def bufferSize = 4_096
+        def factory = new StandardFactory(ir, ir, bufferSize)
+        def fb = new GrowableBuffers(bufferSize, false)
+        def btree = new BTree(fb, factory)
+
+        when:
+        def map = new HashMap(total)
+        for(int i = 0; i < total; ++i) {
+            def k = random.nextInt()
+            def v = random.nextInt()
+            map[k] = v
+            btree.insert k, v
+        }
+
+        then:
+        map.each { k, v ->
+            assert btree.search(k) == v
+        }
+
+        map.each { k, v ->
+            assert btree.remove(k)
+        }
+    }
+
     def 'test random long/long btree'() {
         def total = 1000
         def list = (0..<total).toList()

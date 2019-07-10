@@ -25,6 +25,7 @@ public class BTree<K,V> {
     private final NodeFactory<K,V> factory;
 
     public int getRoot() { return root; }
+    public BlockAllocator getAllocator() { return allocator; }
     
     private int root;
 
