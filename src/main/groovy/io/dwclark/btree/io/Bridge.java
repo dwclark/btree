@@ -96,6 +96,7 @@ class Bridge {
         return Double.longBitsToDouble(_long(val));
     }
 
+    //TODO: Convert this to use iterative methods, will break in case of large byte[] arrays
     public static int write(final Locator locator, final long at, final byte[] val, final int off, final int length) {
         final ByteBuffer buf = locator.forWrite(at, length);
         final int idx = locator.index(at);
@@ -195,6 +196,7 @@ class Bridge {
         return 8;
     }
 
+    //TODO: Convert this to use iterative methods, will break in case of long byte[] arrays
     public static byte[] read(final Locator locator, final long at, final byte[] target, final int off, final int length) {
         final ByteBuffer buf = locator.forRead(at, length);
         final int idx = locator.index(at);
